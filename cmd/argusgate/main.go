@@ -10,6 +10,7 @@ import (
 )
 
 func main() {
+	// 进程入口只处理启动参数和最终错误；服务组装与运行细节集中在 app 包。
 	configPath := flag.String(
 		"config",
 		"",
@@ -29,6 +30,7 @@ func main() {
 
 	ctx := context.Background()
 
+	// 内部包返回错误而不直接退出进程，退出策略由 main 统一决定。
 	if err := app.Run(ctx, cfg); err != nil {
 		fmt.Println(err)
 	}
