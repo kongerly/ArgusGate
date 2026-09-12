@@ -6,6 +6,7 @@ import (
 	"net/http"
 )
 
+// NewHandler 组装当前阶段的路由与公共 middleware，并返回完整 HTTP 入口。
 func NewHandler(logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 
@@ -19,6 +20,7 @@ func NewHandler(logger *slog.Logger) http.Handler {
 }
 
 func healthz(w http.ResponseWriter, r *http.Request) {
+	// Liveness 只证明进程能够处理 HTTP 请求，不依赖尚未实现的 backend 状态。
 	w.WriteHeader(http.StatusOK)
 	// 此时状态码已经提交；写入失败通常表示客户端断开，handler 无法再返回有效错误。
 	_, _ = fmt.Fprintln(w, "OK")
