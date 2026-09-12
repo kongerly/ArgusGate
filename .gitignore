@@ -1,0 +1,17 @@
+# Editor and local workspace state
+.vscode/
+.idea/
+
+# Go build and test output
+.cache/
+bin/
+*.exe
+*.test
+*.out
+coverage/
+
+# Local configuration, logs, and secrets
+configs/*.local.json
+*.log
+.env
+.env.*
