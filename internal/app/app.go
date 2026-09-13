@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/kongerly/ArgusGate/internal/config"
 	"github.com/kongerly/ArgusGate/internal/httpapi"
@@ -23,18 +25,40 @@ func Run(ctx context.Context, cfg config.Config) error {
 		Addr:    cfg.Server.Address,
 		Handler: handler,
 	}
-	// ctx 是后续优雅关闭的生命周期入口；当前 Phase 0 尚未接入关闭流程。
-	_ = ctx
 
 	logger.Info(
 		"starting HTTP server",
 		"address", cfg.Server.Address,
 	)
 
-	err := server.ListenAndServe()
-	// 主动关闭会返回 ErrServerClosed，它属于正常生命周期而不是启动故障。
-	if err != nil && err != http.ErrServerClosed {
+	errCh := make(chan error, 1)
+
+	go func() {
+		err := server.ListenAndServe()
+		errCh <- err
+
+	}()
+
+	select {
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+
 		return fmt.Errorf("serve HTTP: %w", err)
+
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(
+			context.Background(),
+			5*time.Second,
+		)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("shutdown server: %w", err)
+		}
+
+		return nil
 	}
-	return nil
+
 }

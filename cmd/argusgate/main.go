@@ -4,6 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/kongerly/ArgusGate/internal/app"
 	"github.com/kongerly/ArgusGate/internal/config"
@@ -25,10 +28,8 @@ func main() {
 		return
 	}
 
-	fmt.Println("ArgusGate is running...")
-	fmt.Println(cfg.Server.Address)
-
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// 内部包返回错误而不直接退出进程，退出策略由 main 统一决定。
 	if err := app.Run(ctx, cfg); err != nil {
