@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,7 +14,13 @@ import (
 )
 
 func main() {
-	// 进程入口只处理启动参数和最终错误；服务组装与运行细节集中在 app 包。
+	if err := run(); err != nil {
+		slog.Error("argusgate exited with error", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	configPath := flag.String(
 		"config",
 		"",
@@ -24,15 +31,15 @@ func main() {
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		fmt.Println(err)
-		return
+		return fmt.Errorf("load config: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 内部包返回错误而不直接退出进程，退出策略由 main 统一决定。
 	if err := app.Run(ctx, cfg); err != nil {
-		fmt.Println(err)
+		return fmt.Errorf("run app: %w", err)
 	}
+
+	return nil
 }
