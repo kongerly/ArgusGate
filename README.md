@@ -2,7 +2,7 @@
 
 ArgusGate 是一个使用 Go 构建的 OpenAI-compatible AI 推理网关。它位于 AI 应用与独立推理服务之间，计划统一处理请求校验、后端路由、普通与 SSE 响应转发、取消传播、健康检查和可观测性。
 
-> 当前状态：**v0.1 / Phase 0（基础服务）开发中**。仓库已具备 Go 模块、命令入口、最小 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID 和基础结构化请求日志；尚未实现优雅关闭、CI 和模型请求代理。
+> 当前状态：**v0.1 / Phase 0（基础服务）开发中**。仓库已具备 Go 模块、命令入口、最小 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID 和基础结构化请求日志，并已接通 SIGINT/SIGTERM 到限时 `Server.Shutdown` 的第一阶段关闭流程；尚未完成受控强制取消、关闭流程的配置化与集成测试、CI 和模型请求代理。
 
 ## 项目目标
 
@@ -45,7 +45,8 @@ v0.1 的核心目标包括：
 | 示例配置 | 已完成最小版本 | 当前仅包含 `server.address` |
 | HTTP Server 与 `/healthz` | 已完成最小版本 | 服务监听配置地址；`GET /healthz` 返回 200，其他 method 由路由拒绝 |
 | Request ID 与结构化请求日志 | 已完成最小版本 | 响应包含 `X-Request-ID`，请求结束记录 method、path、status、request ID 和 duration |
-| SIGINT/SIGTERM 与优雅关闭 | 未开始 | 计划在 Phase 0 完成 |
+| `app.Run` 生命周期边界 | 已完成骨架 | App 组装 HTTP Server，并处理监听与 `Shutdown` 的基础流程 |
+| SIGINT/SIGTERM 与优雅关闭 | 部分完成 | 入口捕获信号，App 使用 5 秒超时调用 `Server.Shutdown`；配置化超时、受控强制取消、goroutine 汇合与集成测试待补 |
 | CI | 未开始 | 计划检查 format、vet 和 test |
 | 非流式代理 | 未开始 | Phase 1 |
 | SSE 与取消传播 | 未开始 | Phase 2 |
@@ -61,7 +62,7 @@ go vet ./...
 gofmt -d cmd internal
 ```
 
-当前测试覆盖配置默认值、覆盖读取及主要失败路径，并验证健康检查、method 限制、Request ID 和请求日志。优雅关闭和真实监听生命周期尚未获得集成测试覆盖。
+当前测试覆盖配置默认值、覆盖读取及主要失败路径，并验证健康检查、method 限制、Request ID 和请求日志。`app.Run`、信号处理、优雅关闭和真实监听生命周期尚未获得集成测试覆盖。
 
 ## 快速开始（当前开发状态）
 
@@ -81,8 +82,6 @@ go run ./cmd/argusgate -config ./configs/argusgate.example.json
 当前预期启动日志类似：
 
 ```text
-ArgusGate is running...
-127.0.0.1:8080
 time=... level=INFO msg="starting HTTP server" address=127.0.0.1:8080
 ```
 
@@ -92,7 +91,7 @@ time=... level=INFO msg="starting HTTP server" address=127.0.0.1:8080
 curl -i http://127.0.0.1:8080/healthz
 ```
 
-响应状态为 `200 OK`、body 为 `OK`，并包含 `X-Request-ID`。当前尚未接入信号驱动的优雅关闭；停止进程会直接结束服务。代理调用示例将在对应功能实现后补充。
+响应状态为 `200 OK`、body 为 `OK`，并包含 `X-Request-ID`。按 Ctrl+C 会触发信号驱动的第一阶段关闭，服务最多等待 5 秒让在途 Handler 完成；如果超时，当前实现会返回错误并由进程退出。关闭超时目前仍为硬编码值，尚未实现通过 `Server.BaseContext` 和 `Server.Close` 受控取消在途请求、汇合服务 goroutine、分类记录关闭结果及对应集成测试。代理调用示例将在对应功能实现后补充。
 
 不指定 `-config` 时使用内置默认配置：
 
