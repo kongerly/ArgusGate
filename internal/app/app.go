@@ -19,6 +19,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 		slog.NewTextHandler(os.Stdout, nil),
 	)
 
+	shutdownTimeout, err := time.ParseDuration(cfg.Server.ShutdownTimeout)
+	if err != nil {
+		return fmt.Errorf("parse shutdown timeout: %w", err)
+	}
+
 	handler := httpapi.NewHandler(logger)
 
 	server := &http.Server{
@@ -36,7 +41,6 @@ func Run(ctx context.Context, cfg config.Config) error {
 	go func() {
 		err := server.ListenAndServe()
 		errCh <- err
-
 	}()
 
 	select {
@@ -44,21 +48,19 @@ func Run(ctx context.Context, cfg config.Config) error {
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
-
 		return fmt.Errorf("serve HTTP: %w", err)
 
 	case <-ctx.Done():
+		// 关闭宽限期使用独立 context，避免触发关闭的父 context 立即取消 Shutdown。
 		shutdownCtx, cancel := context.WithTimeout(
 			context.Background(),
-			5*time.Second,
+			shutdownTimeout,
 		)
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown server: %w", err)
 		}
-
 		return nil
 	}
-
 }

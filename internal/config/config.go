@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"time"
 )
 
 // Config 汇总启动时读取的静态配置；加载完成后调用方应将其视为不可变值。
@@ -15,22 +17,32 @@ type Config struct {
 
 // ServerConfig 定义 HTTP Server 当前阶段实际使用的配置项。
 type ServerConfig struct {
-	Address string `json:"address"`
+	Address         string `json:"address"`
+	ShutdownTimeout string `json:"shutdown_timeout"`
 }
 
 // Default 返回无需配置文件即可在本机安全启动的最小配置。
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
-			Address: "127.0.0.1:8080",
+			Address:         "127.0.0.1:8080",
+			ShutdownTimeout: "5s",
 		},
 	}
 }
 
 // Validate 检查服务启动所需的不变量，不负责补默认值。
 func (c Config) Validate() error {
-	if c.Server.Address == "" {
-		return fmt.Errorf("server address is required")
+	if strings.TrimSpace(c.Server.Address) == "" {
+		return fmt.Errorf("server.address must not be empty")
+	}
+
+	if strings.TrimSpace(c.Server.ShutdownTimeout) == "" {
+		return fmt.Errorf("server.shutdown_timeout must not be empty")
+	}
+
+	if _, err := time.ParseDuration(c.Server.ShutdownTimeout); err != nil {
+		return fmt.Errorf("server.shutdown_timeout must be a valid duration: %w", err)
 	}
 
 	return nil

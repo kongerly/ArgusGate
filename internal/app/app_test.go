@@ -9,12 +9,9 @@ import (
 	"github.com/kongerly/ArgusGate/internal/config"
 )
 
-func TestRunStopWhenContextCanceled(t *testing.T) {
-	cfg := config.Config{
-		Server: config.ServerConfig{
-			Address: "127.0.0.1:0",
-		},
-	}
+func TestRunStopsWhenContextCanceled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.Address = "127.0.0.1:0"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -45,11 +42,8 @@ func TestRunReturnsErrorWhenAddressInUse(t *testing.T) {
 
 	addr := listener.Addr().String()
 
-	cfg := config.Config{
-		Server: config.ServerConfig{
-			Address: addr,
-		},
-	}
+	cfg := config.Default()
+	cfg.Server.Address = addr
 
 	ctx := context.Background()
 

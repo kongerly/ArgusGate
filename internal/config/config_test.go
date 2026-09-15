@@ -16,6 +16,14 @@ func TestDefault(t *testing.T) {
 			cfg.Server.Address,
 		)
 	}
+
+	if cfg.Server.ShutdownTimeout != "5s" {
+		t.Fatalf(
+			"expected default shutdown timeout %q, got %q",
+			"5s",
+			cfg.Server.ShutdownTimeout,
+		)
+	}
 }
 
 func TestLoadOverridesDefault(t *testing.T) {
@@ -29,9 +37,8 @@ func TestLoadOverridesDefault(t *testing.T) {
 		}
 	}`)
 
-	err := os.WriteFile(path, data, 0644)
-	if err != nil {
-		t.Fatalf("failed to write config file: %v", err)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 
 	cfg, err := Load(path)
@@ -44,6 +51,15 @@ func TestLoadOverridesDefault(t *testing.T) {
 			"expected address %q, got %q",
 			"127.0.0.1:9090",
 			cfg.Server.Address,
+		)
+	}
+
+	// 未显式配置 shutdown_timeout 时保留默认值，确保旧的最小配置仍可使用。
+	if cfg.Server.ShutdownTimeout != "5s" {
+		t.Fatalf(
+			"expected default shutdown timeout %q, got %q",
+			"5s",
+			cfg.Server.ShutdownTimeout,
 		)
 	}
 }
@@ -64,24 +80,13 @@ func TestLoadInvalidJSON(t *testing.T) {
 
 	path := filepath.Join(dir, "config.json")
 
-	data := []byte(`{
-		"server": {
-			"address": "127.0.0.1:9090"
-		}
-	}`)
+	data := []byte(`{ invalid json }`)
 
-	err := os.WriteFile(path, data, 0644)
-	if err != nil {
+	if err := os.WriteFile(path, data, 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
-	// 修改文件，使其包含无效的 JSON
-	err = os.WriteFile(path, []byte(`{ invalid json }`), 0644)
-	if err != nil {
-		t.Fatalf("write invalid config: %v", err)
-	}
-
-	_, err = Load(path)
+	_, err := Load(path)
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
@@ -141,7 +146,7 @@ func TestLoadInvalidConfig(t *testing.T) {
 		t.Fatalf("expected validate config error, got %q", err.Error())
 	}
 
-	if !strings.Contains(err.Error(), "server address is required") {
+	if !strings.Contains(err.Error(), "server.address must not be empty") {
 		t.Fatalf("expected server address validation error, got %q", err.Error())
 	}
 }
@@ -157,6 +162,14 @@ func TestLoadWithoutPath(t *testing.T) {
 			"expected default address %q, got %q",
 			"127.0.0.1:8080",
 			cfg.Server.Address,
+		)
+	}
+
+	if cfg.Server.ShutdownTimeout != "5s" {
+		t.Fatalf(
+			"expected default shutdown timeout %q, got %q",
+			"5s",
+			cfg.Server.ShutdownTimeout,
 		)
 	}
 }
@@ -192,5 +205,63 @@ func TestLoadMultipleJSONValues(t *testing.T) {
 			"expected multiple JSON values error, got %q",
 			err.Error(),
 		)
+	}
+}
+
+func TestLoadEmptyShutdownTimeout(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	data := []byte(`{
+		"server": {
+			"address": "127.0.0.1:8080",
+			"shutdown_timeout": ""
+		}
+	}`)
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "validate config") {
+		t.Fatalf("expected validate config error, got %q", err.Error())
+	}
+
+	if !strings.Contains(err.Error(), "shutdown_timeout must not be empty") {
+		t.Fatalf("expected shutdown timeout empty error, got %q", err.Error())
+	}
+}
+
+func TestLoadInvalidShutdownTimeout(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	data := []byte(`{
+		"server": {
+			"address": "127.0.0.1:8080",
+			"shutdown_timeout": "not-a-duration"
+		}
+	}`)
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "validate config") {
+		t.Fatalf("expected validate config error, got %q", err.Error())
+	}
+
+	if !strings.Contains(err.Error(), "must be a valid duration") {
+		t.Fatalf("expected invalid duration error, got %q", err.Error())
 	}
 }

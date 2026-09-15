@@ -2,7 +2,7 @@
 
 ArgusGate 是一个使用 Go 构建的 OpenAI-compatible AI 推理网关。它位于 AI 应用与独立推理服务之间，计划统一处理请求校验、后端路由、普通与 SSE 响应转发、取消传播、健康检查和可观测性。
 
-> 当前状态：**v0.1 / Phase 0（基础服务）开发中**。仓库已具备 Go 模块、命令入口、最小 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID、基础结构化请求日志和最小 CI，并已接通 SIGINT/SIGTERM 到限时 `Server.Shutdown` 的第一阶段关闭流程；尚未完成受控强制取消、关闭超时配置化、完整关闭生命周期集成测试和模型请求代理。
+> 当前状态：**v0.1 / Phase 0（基础服务）已完成，Phase 1 待开始**。仓库已具备 Go 模块、命令入口、最小 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID、基础结构化请求日志和最小 CI，并已实现 SIGINT/SIGTERM 驱动的可配置限时 `Server.Shutdown`；模型请求代理尚未开始。
 
 ## 项目目标
 
@@ -36,18 +36,18 @@ v0.1 的核心目标包括：
 
 ## 当前进度
 
-截至当前工作区状态，项目处于路线图的 Phase 0。
+截至当前工作区状态，项目已完成路线图的 Phase 0，尚未开始 Phase 1。
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
 | Go module 与命令入口 | 已完成最小骨架 | module 为 `github.com/kongerly/ArgusGate` |
-| JSON 配置默认值、读取与基础校验 | 已完成最小版本 | 支持默认监听地址、严格 JSON 读取和空地址校验，并覆盖主要错误路径测试 |
-| 示例配置 | 已完成最小版本 | 当前仅包含 `server.address` |
+| JSON 配置默认值、读取与基础校验 | 已完成 Phase 0 | 支持监听地址和关闭超时的默认值、严格 JSON 读取及必要校验，并覆盖主要错误路径测试 |
+| 示例配置 | 已完成 Phase 0 | 包含 `server.address` 和 `server.shutdown_timeout` |
 | HTTP Server 与 `/healthz` | 已完成最小版本 | 服务监听配置地址；`GET /healthz` 返回 200，其他 method 由路由拒绝 |
 | Request ID 与结构化请求日志 | 已完成最小版本 | 响应包含 `X-Request-ID`，请求结束记录 method、path、status、request ID 和 duration |
-| `app.Run` 生命周期边界 | 已完成骨架 | App 组装 HTTP Server，并处理监听与 `Shutdown` 的基础流程 |
-| SIGINT/SIGTERM 与优雅关闭 | 部分完成 | 入口捕获信号，App 使用 5 秒超时调用 `Server.Shutdown`；配置化超时、受控强制取消、goroutine 汇合与集成测试待补 |
-| CI | 已建立最小流程 | GitHub Actions 在 push 和 pull request 时检查 format、vet 和 test；当前格式门槛仍有待清理的文件 |
+| `app.Run` 生命周期边界 | 已完成 Phase 0 | App 组装 HTTP Server，返回监听错误，并在 context 取消后执行限时 `Shutdown` |
+| SIGINT/SIGTERM 与优雅关闭 | 已完成 Phase 0 | 入口将信号转换为 context 取消，App 按 `server.shutdown_timeout` 等待服务关闭 |
+| CI | 已完成 Phase 0 | GitHub Actions 在 push 和 pull request 时检查 format、vet 和 test；当前本地检查全部通过 |
 | 非流式代理 | 未开始 | Phase 1 |
 | SSE 与取消传播 | 未开始 | Phase 2 |
 | 多后端路由与健康检查 | 未开始 | Phase 3 |
@@ -59,9 +59,10 @@ v0.1 的核心目标包括：
 ```text
 go test ./...
 go vet ./...
+gofmt -l .
 ```
 
-`gofmt -l .` 当前仍会报告部分 Go 文件，因此 CI 的格式门槛尚未通过。现有测试覆盖配置默认值、覆盖读取及主要失败路径，验证健康检查、method 限制、Request ID 和请求日志，并覆盖 `app.Run` 在 context 取消时退出以及监听地址冲突时返回错误。操作系统信号、在途请求优雅完成、超时后的强制取消和完整真实监听生命周期仍缺少集成测试。
+其中 `gofmt -l .` 无输出。现有测试覆盖配置默认值、配置覆盖及主要失败路径，包含关闭超时的默认值和非法值校验；同时验证健康检查、method 限制、Request ID、请求日志，以及 `app.Run` 在 context 取消时退出和监听地址冲突时返回错误。
 
 ## 快速开始（当前开发状态）
 
@@ -90,7 +91,7 @@ time=... level=INFO msg="starting HTTP server" address=127.0.0.1:8080
 curl -i http://127.0.0.1:8080/healthz
 ```
 
-响应状态为 `200 OK`、body 为 `OK`，并包含 `X-Request-ID`。按 Ctrl+C 会触发信号驱动的第一阶段关闭，服务最多等待 5 秒让在途 Handler 完成；如果超时，当前实现会返回错误并由进程退出。关闭超时目前仍为硬编码值，尚未实现通过 `Server.BaseContext` 和 `Server.Close` 受控取消在途请求、汇合服务 goroutine、分类记录关闭结果及对应集成测试。代理调用示例将在对应功能实现后补充。
+响应状态为 `200 OK`、body 为 `OK`，并包含 `X-Request-ID`。按 Ctrl+C 会触发信号驱动的优雅关闭，服务按照 `server.shutdown_timeout` 等待在途 Handler 完成；默认等待 5 秒，超时后返回错误并由进程退出。代理流的强制取消与资源回收验证属于后续阶段，代理调用示例将在对应功能实现后补充。
 
 不指定 `-config` 时使用内置默认配置：
 
@@ -100,17 +101,18 @@ go run ./cmd/argusgate
 
 ## 当前配置
 
-配置使用 JSON。现阶段只支持监听地址：
+配置使用 JSON。Phase 0 支持监听地址和关闭超时：
 
 ```json
 {
   "server": {
-    "address": "127.0.0.1:8080"
+    "address": "127.0.0.1:8080",
+    "shutdown_timeout": "5s"
   }
 }
 ```
 
-配置加载器已经实现文件读取、严格 JSON 字段检查、额外 JSON 值检查和空监听地址校验，并通过自动测试覆盖这些主要错误路径。v0.1 后续会随阶段逐步加入 HTTP 超时、请求体上限、健康检查、上游传输和 backend 配置；配置格式以设计文档和实际实现为准，不提前承诺尚未落地的字段。
+`shutdown_timeout` 使用 Go duration 格式，例如 `5s`、`500ms` 或 `1m`。配置加载器已经实现文件读取、严格 JSON 字段检查、额外 JSON 值检查、空值校验和关闭超时格式校验，并通过自动测试覆盖这些主要错误路径。v0.1 后续会随阶段逐步加入 HTTP 超时、请求体上限、健康检查、上游传输和 backend 配置；配置格式以设计文档和实际实现为准，不提前承诺尚未落地的字段。
 
 ## 开发与验证
 
