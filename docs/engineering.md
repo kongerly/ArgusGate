@@ -235,14 +235,12 @@ go test -count=1 ./...
 初始 CI 在 push 和 pull request 时运行：
 
 ```text
-go mod download
-go fmt ./...
-git diff --exit-code -- '*.go'
+test -z "$(gofmt -l .)"
 go vet ./...
 go test ./...
 ```
 
-格式检查通过 `go fmt` 后的 Git diff 实现。CI 中只用它验证格式，不提交自动改写结果。出现共享并发状态后增加独立 race job：
+格式检查通过 `gofmt -l .` 的输出是否为空进行验证，CI 不自动改写或提交文件。依赖由 Go 命令按 `go.mod` 下载。出现共享并发状态后增加独立 race job：
 
 ```text
 go test -race ./...
@@ -268,6 +266,15 @@ CI 原则：
 - 依赖变更在提交说明中写明原因。
 - 重构与行为变化尽量分开提交。
 - 不提交仅为“以后可能用到”的接口、配置项和空目录。
+
+### 12.1 Agent 授权与路线约束
+
+- 所有 AI Agent 必须遵守仓库根目录的 [`AGENTS.md`](../AGENTS.md)。
+- Agent 只能实施用户明确要求的工作及其不可缺少的最小配套修改；不得把改进建议视为实施授权。
+- 未经用户明确允许，Agent 不得自行添加功能、接口、配置、依赖、目录或预建抽象。
+- 未经用户明确允许，Agent 不得新增、删除、提前、推迟、重排或替换路线图任务，不得改变当前 Phase、版本范围或项目开发方向。
+- 发现范围外需求或路线调整机会时，Agent 应先说明依据、影响和可选方案，取得用户明确授权后才能修改实现或路线文档。
+- 即使测试或重构能够顺带实现额外能力，也必须保持在当前授权范围内；会改变外部行为、公共接口、配置格式或路线安排的修复需先由用户决定。
 
 ## 13. Security
 
@@ -311,6 +318,7 @@ v0.1 不实现用户认证，但必须遵守 `design.md` 的 trust boundary：
 - `docs/design.md`：稳定的定位、边界、系统行为、架构和设计决策索引。
 - `docs/v0.1_roadmap.md`：v0.1 阶段任务、Knowledge Checkpoint、验收与发布清单。
 - `docs/engineering.md`：开发流程、Go 规则、测试、CI、Git、安全和公开策略。
+- `AGENTS.md`：AI Agent 的授权边界、路线约束和仓库内变更要求。
 - `docs/adr/*.md`：具有长期影响的单项决策及其背景、后果和被拒方案。
 
 只在真实内容出现时创建新文档，不创建 `api.md`、`development.md`、`learning-log.md` 等空占位。API 契约目前属于 `design.md`，学习检查属于 `v0.1_roadmap.md`；当内容规模或使用者真的需要独立入口时再拆分。

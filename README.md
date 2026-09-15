@@ -2,7 +2,7 @@
 
 ArgusGate 是一个使用 Go 构建的 OpenAI-compatible AI 推理网关。它位于 AI 应用与独立推理服务之间，计划统一处理请求校验、后端路由、普通与 SSE 响应转发、取消传播、健康检查和可观测性。
 
-> 当前状态：**v0.1 / Phase 0（基础服务）开发中**。仓库已具备 Go 模块、命令入口、最小 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID 和基础结构化请求日志，并已接通 SIGINT/SIGTERM 到限时 `Server.Shutdown` 的第一阶段关闭流程；尚未完成受控强制取消、关闭流程的配置化与集成测试、CI 和模型请求代理。
+> 当前状态：**v0.1 / Phase 0（基础服务）开发中**。仓库已具备 Go 模块、命令入口、最小 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID、基础结构化请求日志和最小 CI，并已接通 SIGINT/SIGTERM 到限时 `Server.Shutdown` 的第一阶段关闭流程；尚未完成受控强制取消、关闭超时配置化、完整关闭生命周期集成测试和模型请求代理。
 
 ## 项目目标
 
@@ -47,7 +47,7 @@ v0.1 的核心目标包括：
 | Request ID 与结构化请求日志 | 已完成最小版本 | 响应包含 `X-Request-ID`，请求结束记录 method、path、status、request ID 和 duration |
 | `app.Run` 生命周期边界 | 已完成骨架 | App 组装 HTTP Server，并处理监听与 `Shutdown` 的基础流程 |
 | SIGINT/SIGTERM 与优雅关闭 | 部分完成 | 入口捕获信号，App 使用 5 秒超时调用 `Server.Shutdown`；配置化超时、受控强制取消、goroutine 汇合与集成测试待补 |
-| CI | 未开始 | 计划检查 format、vet 和 test |
+| CI | 已建立最小流程 | GitHub Actions 在 push 和 pull request 时检查 format、vet 和 test；当前格式门槛仍有待清理的文件 |
 | 非流式代理 | 未开始 | Phase 1 |
 | SSE 与取消传播 | 未开始 | Phase 2 |
 | 多后端路由与健康检查 | 未开始 | Phase 3 |
@@ -59,10 +59,9 @@ v0.1 的核心目标包括：
 ```text
 go test ./...
 go vet ./...
-gofmt -d cmd internal
 ```
 
-当前测试覆盖配置默认值、覆盖读取及主要失败路径，并验证健康检查、method 限制、Request ID 和请求日志。`app.Run`、信号处理、优雅关闭和真实监听生命周期尚未获得集成测试覆盖。
+`gofmt -l .` 当前仍会报告部分 Go 文件，因此 CI 的格式门槛尚未通过。现有测试覆盖配置默认值、覆盖读取及主要失败路径，验证健康检查、method 限制、Request ID 和请求日志，并覆盖 `app.Run` 在 context 取消时退出以及监听地址冲突时返回错误。操作系统信号、在途请求优雅完成、超时后的强制取消和完整真实监听生命周期仍缺少集成测试。
 
 ## 快速开始（当前开发状态）
 
@@ -161,6 +160,7 @@ v0.1 聚焦一个正确、可测试的推理代理，不包含：
 - [`docs/design.md`](./docs/design.md)：v0.1 的定位、范围、接口、架构和行为基线。
 - [`docs/v0.1_roadmap.md`](./docs/v0.1_roadmap.md)：分阶段任务、验收条件与发布清单。
 - [`docs/engineering.md`](./docs/engineering.md)：代码、测试、CI、Git 和安全规范。
+- [`AGENTS.md`](./AGENTS.md)：所有 AI Agent 必须遵守的授权边界和变更约束。
 
 当文档之间出现冲突时，系统行为以 `design.md` 为准，阶段范围以 `v0.1_roadmap.md` 为准，工程执行方式以 `engineering.md` 为准。
 
