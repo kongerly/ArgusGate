@@ -34,6 +34,7 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// 进程入口只把系统信号转换为 context 取消，应用层不直接依赖操作系统信号。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

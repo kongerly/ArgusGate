@@ -266,7 +266,7 @@ argusgate -config ./configs/argusgate.json
     "read_timeout": "30s",
     "idle_timeout": "60s",
     "max_header_bytes": 1048576,
-    "shutdown_timeout": "15s",
+    "shutdown_timeout": "5s",
     "max_request_body_bytes": 4194304
   },
   "health_check": {
@@ -305,7 +305,7 @@ argusgate -config ./configs/argusgate.json
 - 目标 URL 只能通过复制已经校验的 backend origin，再设置解析后的 `Path`/`RawPath` 构造；禁止使用可能把 `//host/path` 解释为新 authority 的 reference resolution。
 - v0.1 不接受客户端 query 参数，也不把它们转发到 backend。
 - secret 只通过环境变量名引用，不直接写入配置文件。
-- duration 在加载阶段解析为 `time.Duration`。
+- duration 在加载阶段校验为 `time.Duration` 可解析格式，在使用边界解析为实际超时值。
 - v0.1 不支持热加载，修改后需要重启服务。
 - 不为整个生成请求设置固定 `http.Client.Timeout`。
 - 连接、TLS 和等待响应头分别设置上限；长时间响应体读取由客户端 context 控制。
