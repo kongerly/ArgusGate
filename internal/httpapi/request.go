@@ -12,6 +12,7 @@ import (
 var errBodyTooLarge = errors.New("body too large")
 
 func readBody(r io.Reader, maxSize int64) ([]byte, error) {
+	// 额外读取一个字节才能区分“恰好达到上限”和“已经超过上限”，同时避免无界读取。
 	raw, err := io.ReadAll(io.LimitReader(r, maxSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
@@ -30,6 +31,7 @@ type requestProbe struct {
 }
 
 func parseRequestProbe(raw []byte) (requestProbe, error) {
+	// 探针只提取网关决策所需字段；后续转发仍使用 raw，避免重编码改变未知字段或数值表示。
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
 		return requestProbe{}, fmt.Errorf("request body is empty")
@@ -57,6 +59,7 @@ func validateProbe(p requestProbe) error {
 	}
 
 	if p.Stream {
+		// Phase 1 只开放非流式路径；SSE 的 flush 与提交后错误语义将在 Phase 2 一并实现。
 		return errStreamNotSupported
 	}
 
