@@ -2,7 +2,7 @@
 
 ArgusGate 是一个正在使用 Go 构建的 OpenAI-compatible AI 推理网关。它位于 AI 应用与独立推理服务之间，计划统一处理请求校验、后端路由、普通与 SSE 响应转发、取消传播、健康检查和可观测性。
 
-> 当前状态：**v0.1 / Phase 0（基础服务）已完成，Phase 1（非流式单后端代理）进行中，但尚未达到验收闭环**。仓库已具备 Go 模块、命令入口、最小 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID、基础结构化请求日志和最小 CI，并已实现 SIGINT/SIGTERM 驱动的可配置限时 `Server.Shutdown`。Phase 1 已实现请求体限长读取、请求探针解析与校验、最小上游 POST 和调用方 context 继承等基础组件；这些组件尚未接入 `/v1/chat/completions`。
+> 当前状态：**v0.1 / Phase 0（基础服务）已完成，Phase 1（非流式单后端代理）进行中，但尚未达到验收闭环**。仓库已具备 Go 模块、命令入口、最小 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID、基础结构化请求日志和最小 CI，并已实现 SIGINT/SIGTERM 驱动的可配置限时 `Server.Shutdown`。Phase 1 已实现请求体限长读取、请求探针解析与校验、最小上游 POST、调用方 context 继承，以及请求 header 过滤与网关托管 header 覆盖等基础组件；这些组件尚未接入 `/v1/chat/completions`。
 
 ## 项目目标
 
@@ -49,8 +49,8 @@ v0.1 的核心目标包括：
 | SIGINT/SIGTERM 与优雅关闭 | 已完成 Phase 0 | 入口将信号转换为 context 取消，App 按 `server.shutdown_timeout` 等待服务关闭 |
 | CI | 已完成 Phase 0 | GitHub Actions 在 push 和 pull request 时检查 format、vet 和 test；当前本地检查全部通过 |
 | 请求体读取与请求探针 | 已完成 Phase 1 基础组件 | 组件测试已验证限长读取原始 body、只解析 `model` 和 `stream`，以及拒绝无效输入；尚未形成 HTTP 接口行为 |
-| 最小上游请求 | 已完成 Phase 1 基础组件 | 使用共享 `http.Client` 发送 POST，原样保留请求 body，并继承调用方 context；尚未接入 HTTP API |
-| 非流式端到端代理 | 进行中 | `/v1/chat/completions`、单 backend 配置、header 规则、响应透传与统一错误仍待实现 |
+| 最小上游请求 | 已完成 Phase 1 基础组件 | 使用共享 `http.Client` 发送 POST，原样保留请求 body，并继承调用方 context；过滤固定及 `Connection` 动态声明的 hop-by-hop headers，由网关覆盖 Request ID 和可选上游凭据；尚未接入 HTTP API |
+| 非流式端到端代理 | 进行中 | `/v1/chat/completions`、单 backend 配置接入、响应透传与统一错误仍待实现 |
 | SSE 与客户端断连处理 | 未开始 | Phase 2 |
 | 多后端路由与健康检查 | 未开始 | Phase 3 |
 | Prometheus 指标 | 未开始 | Phase 4 |
@@ -64,7 +64,7 @@ go vet ./...
 gofmt -l .
 ```
 
-其中 `gofmt -l .` 无输出。现有测试覆盖配置默认值、配置覆盖及主要失败路径，包含关闭超时的默认值和非法值校验；同时验证健康检查、method 限制、Request ID、请求日志，以及 `app.Run` 在 context 取消时退出和监听地址冲突时返回错误。Phase 1 测试还覆盖请求体大小边界、请求探针解析与校验、上游 POST 原始 body 保留，以及 context 取消后停止等待上游响应。
+其中 `gofmt -l .` 无输出。现有测试覆盖配置默认值、配置覆盖及主要失败路径，包含关闭超时的默认值和非法值校验；同时验证健康检查、method 限制、Request ID、请求日志，以及 `app.Run` 在 context 取消时退出和监听地址冲突时返回错误。Phase 1 测试还覆盖请求体大小边界、请求探针解析与校验、上游 POST 原始 body 保留、context 取消后停止等待上游响应、hop-by-hop header 过滤、多值 header 保留，以及客户端认证和 Request ID 不会绕过网关托管规则。
 
 ## 快速开始（当前开发状态）
 
