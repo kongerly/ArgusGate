@@ -5,9 +5,23 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/kongerly/ArgusGate/internal/proxy"
 )
+
+func newTestProxy(t *testing.T) *proxy.Proxy {
+	t.Helper()
+
+	endpoint, err := url.Parse("http://127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("parse test endpoint: %v", err)
+	}
+
+	return proxy.New(http.DefaultClient, endpoint, "")
+}
 
 func TestRequestIDMiddlewareAddsRequestIDToContext(t *testing.T) {
 	var gotRequestID string
@@ -43,7 +57,7 @@ func TestLoggingMiddleware(t *testing.T) {
 		slog.NewTextHandler(&buf, nil),
 	)
 
-	handler := NewHandler(logger)
+	handler := NewHandler(logger, newTestProxy(t))
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
