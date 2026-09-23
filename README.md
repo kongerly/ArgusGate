@@ -2,7 +2,7 @@
 
 ArgusGate 是一个正在使用 Go 构建的 OpenAI-compatible AI 推理网关。它位于 AI 应用与独立推理服务之间，计划统一处理请求校验、后端路由、普通与 SSE 响应转发、取消传播、健康检查和可观测性。
 
-> 当前状态：**v0.1 / Phase 0（基础服务）已完成，Phase 1（非流式单后端代理）进行中，但尚未达到验收闭环**。仓库已具备 Go 模块、命令入口、最小 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID、基础结构化请求日志和最小 CI，并已实现 SIGINT/SIGTERM 驱动的可配置限时 `Server.Shutdown`。Phase 1 已实现请求体限长读取、请求探针解析与校验、最小上游 POST、调用方 context 继承，以及请求 header 过滤与网关托管 header 覆盖等基础组件；这些组件尚未接入 `/v1/chat/completions`。
+> 当前状态：**v0.1 / Phase 0（基础服务）已完成，Phase 1（非流式单后端代理）进行中，但尚未达到验收闭环**。仓库已具备 Go 模块、命令入口、严格 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID、基础结构化请求日志和最小 CI，并已实现 SIGINT/SIGTERM 驱动的可配置限时 `Server.Shutdown`。Phase 1 已实现单 backend 配置和 origin 校验、代理依赖装配、请求体限长读取、请求探针解析与校验、最小上游 POST、调用方 context 继承，以及请求 header 过滤与网关托管 header 覆盖等基础组件；这些组件仍未接入 `/v1/chat/completions`。
 
 ## 项目目标
 
@@ -36,13 +36,13 @@ v0.1 的核心目标包括：
 
 ## 当前进度
 
-截至当前实现，项目已完成路线图的 Phase 0，Phase 1 已进入进行中状态。当前基础组件已有代码和单元测试支撑，但尚未接入生产 Handler，因此对应路线图任务仍未勾选；Phase 1 验收项也仍未达成，完整的非流式代理链路尚未连通。
+截至当前实现，项目已完成路线图的 Phase 0，Phase 1 已进入进行中状态。单 backend 配置、origin 校验和代理依赖装配已有代码与单元测试支撑；请求体读取、请求探针和上游请求也有独立组件测试，但代理尚未接入生产 Handler，因此对应端到端路线任务仍未勾选，Phase 1 验收项尚未达成。
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
 | Go module 与命令入口 | 已完成最小骨架 | module 为 `github.com/kongerly/ArgusGate` |
-| JSON 配置默认值、读取与基础校验 | 已完成 Phase 0 | 支持监听地址和关闭超时的默认值、严格 JSON 读取及必要校验，并覆盖主要错误路径测试 |
-| 示例配置 | 已完成 Phase 0 | 包含 `server.address` 和 `server.shutdown_timeout` |
+| JSON 配置默认值、读取与基础校验 | 已完成 Phase 0；Phase 1 配置扩展已实现 | 严格 JSON 读取；校验监听地址、关闭超时，并要求恰好一个使用合法 HTTP(S) origin 的 backend |
+| 示例配置 | 已更新 | 包含监听地址、关闭超时和一个本地 backend；Authorization 留空 |
 | HTTP Server 与 `/healthz` | 已完成最小版本 | 服务监听配置地址；`GET /healthz` 返回 200，其他 method 由路由拒绝 |
 | Request ID 与结构化请求日志 | 已完成最小版本 | 响应包含 `X-Request-ID`，请求结束记录 method、path、status、request ID 和 duration |
 | `app.Run` 生命周期边界 | 已完成 Phase 0 | App 组装 HTTP Server，返回监听错误，并在 context 取消后执行限时 `Shutdown` |
@@ -50,7 +50,7 @@ v0.1 的核心目标包括：
 | CI | 已完成 Phase 0 | GitHub Actions 在 push 和 pull request 时检查 format、vet 和 test；当前本地检查全部通过 |
 | 请求体读取与请求探针 | 已完成 Phase 1 基础组件 | 组件测试已验证限长读取原始 body、只解析 `model` 和 `stream`，以及拒绝无效输入；尚未形成 HTTP 接口行为 |
 | 最小上游请求 | 已完成 Phase 1 基础组件 | 使用共享 `http.Client` 发送 POST，原样保留请求 body，并继承调用方 context；过滤固定及 `Connection` 动态声明的 hop-by-hop headers，由网关覆盖 Request ID 和可选上游凭据；尚未接入 HTTP API |
-| 非流式端到端代理 | 进行中 | `/v1/chat/completions`、单 backend 配置接入、响应透传与统一错误仍待实现 |
+| 非流式端到端代理 | 进行中 | 单 backend 配置与代理依赖已装配；`/v1/chat/completions` 路由、响应透传与统一错误仍待实现 |
 | SSE 与客户端断连处理 | 未开始 | Phase 2 |
 | 多后端路由与健康检查 | 未开始 | Phase 3 |
 | Prometheus 指标 | 未开始 | Phase 4 |
@@ -93,7 +93,7 @@ time=... level=INFO msg="starting HTTP server" address=127.0.0.1:8080
 curl -i http://127.0.0.1:8080/healthz
 ```
 
-响应状态为 `200 OK`、body 为 `OK`，并包含 `X-Request-ID`。按 Ctrl+C 会触发信号驱动的优雅关闭，服务按照 `server.shutdown_timeout` 等待在途 Handler 完成；默认等待 5 秒，超时后返回错误并由进程退出。当前虽已有可独立测试的请求解析和最小上游请求组件，但 `/v1/chat/completions` 尚未注册，代理调用示例将在完整链路接通后补充。
+响应状态为 `200 OK`、body 为 `OK`，并包含 `X-Request-ID`。按 Ctrl+C 会触发信号驱动的优雅关闭，服务按照 `server.shutdown_timeout` 等待在途 Handler 完成；默认等待 5 秒，超时后返回错误并由进程退出。配置中的 backend origin 会在启动时校验，并用于装配代理依赖；当前 `/v1/chat/completions` 尚未注册，因此服务还不能代理推理请求。
 
 不指定 `-config` 时使用内置默认配置：
 
@@ -103,18 +103,26 @@ go run ./cmd/argusgate
 
 ## 当前配置
 
-配置使用 JSON。当前可用配置仍只有 Phase 0 已落地的监听地址和关闭超时：
+配置使用 JSON。当前支持监听地址、关闭超时和恰好一个 backend：
 
 ```json
 {
   "server": {
     "address": "127.0.0.1:8080",
     "shutdown_timeout": "5s"
-  }
+  },
+  "backends": [
+    {
+      "origin": "http://127.0.0.1:8081",
+      "authorization": ""
+    }
+  ]
 }
 ```
 
-`shutdown_timeout` 使用 Go duration 格式，例如 `5s`、`500ms` 或 `1m`。配置加载器已经实现文件读取、严格 JSON 字段检查、额外 JSON 值检查、空值校验和关闭超时格式校验，并通过自动测试覆盖这些主要错误路径。v0.1 后续会随阶段逐步加入 HTTP 超时、请求体上限、健康检查、上游传输和 backend 配置；配置格式以设计文档和实际实现为准，不提前承诺尚未落地的字段。
+`shutdown_timeout` 使用 Go duration 格式，例如 `5s`、`500ms` 或 `1m`。`backends` 当前必须恰好包含一项；`origin` 必须是没有凭据、业务路径、query 或 fragment 的 HTTP(S) origin。`authorization` 当前作为完整 header 值原样设置到上游请求；留空时不设置该 header。环境变量引用尚未实现；需要在本机联调时，真实凭据只能放在不跟踪的本地配置文件中，绝不能提交。Chat Completions 路由尚未接通，配置 backend 目前不代表已经可调用。
+
+配置加载器还会拒绝未知字段、多个顶层 JSON 值和非法配置；配置扩展的校验路径由 `internal/config` 测试覆盖。其余 HTTP 超时、请求体上限、健康检查和传输参数仍按路线图逐步加入。
 
 ## 开发与验证
 
@@ -132,7 +140,7 @@ go test ./...
 go test -race ./...
 ```
 
-提交前请检查变更中不包含密钥、本地配置、日志、构建产物、模型文件或个人机器路径。真实 backend 的凭据只应通过环境变量引用，不能写入示例配置或版本库。
+提交前请检查变更中不包含密钥、本地配置、日志、构建产物、模型文件或个人机器路径。示例中的 `authorization` 保持为空；当前配置尚不支持环境变量引用，因此不要把真实凭据写入示例配置或任何提交文件。
 
 ## v0.1 路线
 

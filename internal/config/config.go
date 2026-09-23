@@ -23,8 +23,12 @@ type ServerConfig struct {
 	ShutdownTimeout string `json:"shutdown_timeout"`
 }
 
+// BackendConfig 描述 Phase 1 使用的单个静态上游。
 type BackendConfig struct {
-	Origin        string `json:"origin"`
+	// Origin 是 backend 的 HTTP(S) origin，不包含业务路径、query 或凭据。
+	Origin string `json:"origin"`
+	// Authorization 是可选的完整上游 Authorization header 值；当前按原值发送。
+	// 配置文件中的真实凭据不得提交到版本库。
 	Authorization string `json:"authorization"`
 }
 
@@ -58,6 +62,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("server.shutdown_timeout must be a valid duration: %w", err)
 	}
 
+	// Phase 1 通过单 backend 直连建立代理闭环；当前不支持多 backend 选择。
 	if len(c.Backends) != 1 {
 		return fmt.Errorf("exactly one backend is required, got %d", len(c.Backends))
 	}
