@@ -4,12 +4,27 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
+
+	"github.com/kongerly/ArgusGate/internal/proxy"
 )
 
+func newTestHandler(t *testing.T) http.Handler {
+	t.Helper()
+
+	endpoint, err := url.Parse("http://127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("parse test endpoint: %v", err)
+	}
+
+	p := proxy.New(http.DefaultClient, endpoint, "")
+
+	return NewHandler(slog.Default(), p)
+}
+
 func TestHealthz(t *testing.T) {
-	logger := slog.Default()
-	handler := NewHandler(logger)
+	handler := newTestHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -22,8 +37,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestHealthzRejectsPost(t *testing.T) {
-	logger := slog.Default()
-	handler := NewHandler(logger)
+	handler := newTestHandler(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 	rec := httptest.NewRecorder()

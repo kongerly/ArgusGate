@@ -61,3 +61,49 @@ func TestRunReturnsErrorWhenAddressInUse(t *testing.T) {
 		t.Fatal("Run did not return within 2s")
 	}
 }
+
+func TestBuildBackendEndpoint(t *testing.T) {
+	tests := []struct {
+		name    string
+		origin  string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:   "no trailing slash",
+			origin: "http://backend:8081",
+			want:   "http://backend:8081/v1/chat/completions",
+		},
+		{
+			name:   "with trailing slash",
+			origin: "http://backend:8081/",
+			want:   "http://backend:8081/v1/chat/completions",
+		},
+		{
+			name:    "parse error",
+			origin:  "://invalid",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildBackendEndpoint(tt.origin)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got.String() != tt.want {
+				t.Fatalf("endpoint = %q, want %q", got.String(), tt.want)
+			}
+		})
+	}
+}

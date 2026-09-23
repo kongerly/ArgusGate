@@ -26,6 +26,51 @@ func TestDefault(t *testing.T) {
 	}
 }
 
+func TestValidateBackendRequirements(t *testing.T) {
+	tests := []struct {
+		name        string
+		backends    []BackendConfig
+		wantErrText string
+	}{
+		{
+			name:        "nil backends",
+			backends:    nil,
+			wantErrText: "exactly one backend is required",
+		},
+		{
+			name: "two backends",
+			backends: []BackendConfig{
+				{Origin: "http://127.0.0.1:8081"},
+				{Origin: "http://127.0.0.1:8082"},
+			},
+			wantErrText: "exactly one backend is required",
+		},
+		{
+			name: "empty origin",
+			backends: []BackendConfig{
+				{Origin: ""},
+			},
+			wantErrText: "validate backend origin",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Backends = tt.backends
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+
+			if !strings.Contains(err.Error(), tt.wantErrText) {
+				t.Fatalf("expected error containing %q, got %q", tt.wantErrText, err.Error())
+			}
+		})
+	}
+}
+
 func TestLoadOverridesDefault(t *testing.T) {
 	dir := t.TempDir()
 
@@ -263,5 +308,82 @@ func TestLoadInvalidShutdownTimeout(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "must be a valid duration") {
 		t.Fatalf("expected invalid duration error, got %q", err.Error())
+	}
+}
+
+func TestValidateBackendOrigin(t *testing.T) {
+	tests := []struct {
+		name    string
+		origin  string
+		wantErr string
+	}{
+		// 合法
+		{name: "http with port", origin: "http://127.0.0.1:8081"},
+		{name: "https", origin: "https://backend.example.com"},
+		{name: "trailing slash", origin: "http://backend:8081/"},
+		{name: "uppercase scheme", origin: "HTTP://backend:8081"},
+		{name: "mixed-case scheme", origin: "Https://backend.example.com"},
+
+		// 空
+		{name: "empty", origin: "", wantErr: "must not be empty"},
+		{name: "whitespace only", origin: "   ", wantErr: "must not be empty"},
+
+		// scheme
+		{name: "missing scheme", origin: "backend:8081", wantErr: "scheme"},
+		{name: "ftp scheme", origin: "ftp://backend:8081", wantErr: "scheme"},
+
+		// host
+		{name: "empty host", origin: "http:///foo", wantErr: "host"},
+
+		// userinfo
+		{name: "userinfo", origin: "http://user:pass@backend:8081", wantErr: "userinfo"},
+
+		// path
+		{name: "business path", origin: "http://backend:8081/api", wantErr: "path"},
+
+		// query
+		{name: "query with value", origin: "http://backend:8081?foo=bar", wantErr: "query"},
+		{name: "empty query with question mark", origin: "http://backend:8081?", wantErr: "query"},
+
+		// fragment
+		{name: "fragment", origin: "http://backend:8081#foo", wantErr: "fragment"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateBackendOrigin(tt.origin)
+
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+func TestValidateDelegatesToValidateBackendOrigin(t *testing.T) {
+	cfg := Default()
+	cfg.Backends[0].Origin = "ftp://backend:8081"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "validate backend origin") {
+		t.Fatalf("expected error to mention backend origin context, got %q", err.Error())
+	}
+
+	if !strings.Contains(err.Error(), "scheme must be http or https") {
+		t.Fatalf("expected error to mention scheme rule, got %q", err.Error())
 	}
 }

@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+
+	"github.com/kongerly/ArgusGate/internal/proxy"
 )
 
 // NewHandler 组装当前阶段的路由与公共 middleware，并返回完整 HTTP 入口。
-func NewHandler(logger *slog.Logger) http.Handler {
+func NewHandler(logger *slog.Logger, p *proxy.Proxy) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", healthz)

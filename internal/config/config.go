@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -12,7 +13,8 @@ import (
 
 // Config 汇总启动时读取的静态配置；加载完成后调用方应将其视为不可变值。
 type Config struct {
-	Server ServerConfig `json:"server"`
+	Server   ServerConfig    `json:"server"`
+	Backends []BackendConfig `json:"backends"`
 }
 
 // ServerConfig 定义 HTTP Server 当前阶段实际使用的配置项。
@@ -21,12 +23,23 @@ type ServerConfig struct {
 	ShutdownTimeout string `json:"shutdown_timeout"`
 }
 
+type BackendConfig struct {
+	Origin        string `json:"origin"`
+	Authorization string `json:"authorization"`
+}
+
 // Default 返回无需配置文件即可在本机安全启动的最小配置。
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
 			Address:         "127.0.0.1:8080",
 			ShutdownTimeout: "5s",
+		},
+		Backends: []BackendConfig{
+			{
+				Origin:        "http://127.0.0.1:8081",
+				Authorization: "",
+			},
 		},
 	}
 }
@@ -43,6 +56,53 @@ func (c Config) Validate() error {
 
 	if _, err := time.ParseDuration(c.Server.ShutdownTimeout); err != nil {
 		return fmt.Errorf("server.shutdown_timeout must be a valid duration: %w", err)
+	}
+
+	if len(c.Backends) != 1 {
+		return fmt.Errorf("exactly one backend is required, got %d", len(c.Backends))
+	}
+
+	if err := validateBackendOrigin(c.Backends[0].Origin); err != nil {
+		return fmt.Errorf("validate backend origin: %w", err)
+	}
+
+	return nil
+}
+
+// validateBackendOrigin 检查 backend.origin 是否符合 P1 的 URL 规则。
+// 它只描述"后端在哪"，不携带 credential、path、query 等业务信息。
+func validateBackendOrigin(origin string) error {
+	if strings.TrimSpace(origin) == "" {
+		return fmt.Errorf("must not be empty")
+	}
+
+	u, err := url.Parse(origin)
+	if err != nil {
+		return fmt.Errorf("%q is not a valid URL: %w", origin, err)
+	}
+
+	if !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
+		return fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
+	}
+
+	if u.Hostname() == "" {
+		return fmt.Errorf("host must not be empty")
+	}
+
+	if u.User != nil {
+		return fmt.Errorf("userinfo must not be present, use authorization field instead")
+	}
+
+	if u.Path != "" && u.Path != "/" {
+		return fmt.Errorf("path must be empty or %q, got %q", "/", u.Path)
+	}
+
+	if u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("query must not be present")
+	}
+
+	if u.Fragment != "" {
+		return fmt.Errorf("fragment must not be present, got %q", u.Fragment)
 	}
 
 	return nil
