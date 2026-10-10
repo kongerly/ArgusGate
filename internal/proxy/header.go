@@ -20,48 +20,67 @@ var hopByHopHeaders = map[string]struct{}{
 	"Upgrade":             {},
 }
 
-// managedHeaders 是 ArgusGate 自己管理、不允许从客户端透传的头。
-// 这些头由 Forward 显式设置，copyHeaders 必须直接跳过，
-// 否则会出现“先复制、后覆盖”的脏路径。
-var managedHeaders = map[string]struct{}{
+// requestManagedHeaders 是 ArgusGate 在请求方向上自己管理的头。
+// 客户端值不允许透传到 backend：
+//   - Authorization：客户端凭据不能泄漏给 backend，由 Proxy 自己设置 backend credential
+//   - X-Request-Id：客户端伪造的 ID 必须被丢弃，ArgusGate 用自己生成的 ID
+var requestManagedHeaders = map[string]struct{}{
 	"Authorization": {},
 	"X-Request-Id":  {},
 }
 
+// responseManagedHeaders 是 ArgusGate 在响应方向上自己管理的头。
+// backend 值不允许覆盖回客户端：
+//   - X-Request-Id：客户端最终看到的必须是 ArgusGate 当前请求的 ID
+//
+// 这里不过滤 Authorization，因为响应方向不存在
+// “客户端 credential 泄漏到 backend”的信任边界。
+var responseManagedHeaders = map[string]struct{}{
+	"X-Request-Id": {},
+}
+
 // buildSkipSet 返回一个完整的跳过集合，包含三部分：
 //  1. 固定的 hop-by-hop 头
-//  2. Connection 头里动态声明的头
-//  3. ArgusGate 自己管理的头
-func buildSkipSet(src http.Header) map[string]struct{} {
-	skip := make(map[string]struct{}, len(hopByHopHeaders)+len(managedHeaders))
+//  2. 当前方向的 managed 头
+//  3. Connection 头里动态声明的头
+//
+// Connection 的查找使用 EqualFold 遍历 src，而不是 src.Values("Connection")，
+// 因为 http.Header 可能由调用方直接构造，key 未必是规范形式。
+func buildSkipSet(src http.Header, managed map[string]struct{}) map[string]struct{} {
+	skip := make(map[string]struct{}, len(hopByHopHeaders)+len(managed))
 
 	for k := range hopByHopHeaders {
 		skip[k] = struct{}{}
 	}
 
-	for k := range managedHeaders {
+	for k := range managed {
 		skip[k] = struct{}{}
 	}
 
-	for _, value := range src.Values("Connection") {
-		for _, token := range strings.Split(value, ",") {
-			name := strings.TrimSpace(token)
-			if name == "" {
-				continue
+	for key, values := range src {
+		if !strings.EqualFold(key, "Connection") {
+			continue
+		}
+		for _, value := range values {
+			for _, token := range strings.Split(value, ",") {
+				name := strings.TrimSpace(token)
+				if name == "" {
+					continue
+				}
+				skip[http.CanonicalHeaderKey(name)] = struct{}{}
 			}
-			skip[http.CanonicalHeaderKey(name)] = struct{}{}
 		}
 	}
 
 	return skip
 }
 
-// copyHeaders 把 src 里允许的头复制到 dst。
+// copyFiltered 把 src 里允许的头复制到 dst。
 //   - 跳过 buildSkipSet 返回的所有头
 //   - 保留多值头，用 Add 而不是 Set
 //   - key 统一做 canonical 化
-func copyHeaders(dst, src http.Header) {
-	skip := buildSkipSet(src)
+func copyFiltered(dst, src http.Header, managed map[string]struct{}) {
+	skip := buildSkipSet(src, managed)
 
 	for key, values := range src {
 		canonicalKey := http.CanonicalHeaderKey(key)
@@ -73,4 +92,17 @@ func copyHeaders(dst, src http.Header) {
 			dst.Add(canonicalKey, value)
 		}
 	}
+}
+
+// copyHeaders 复制请求方向的 end-to-end 头。
+// 过滤 hop-by-hop、request-managed（Authorization / X-Request-ID）。
+func copyHeaders(dst, src http.Header) {
+	copyFiltered(dst, src, requestManagedHeaders)
+}
+
+// copyResponseHeaders 复制响应方向的 end-to-end 头。
+// 过滤 hop-by-hop、response-managed（X-Request-ID）。
+// Authorization 不过滤，因为响应方向不存在同样的信任边界。
+func copyResponseHeaders(dst, src http.Header) {
+	copyFiltered(dst, src, responseManagedHeaders)
 }
