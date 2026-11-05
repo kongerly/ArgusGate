@@ -2,7 +2,7 @@
 
 ArgusGate 是一个正在使用 Go 构建的 OpenAI-compatible AI 推理网关。它位于 AI 应用与独立推理服务之间，计划统一处理请求校验、后端路由、普通与 SSE 响应转发、取消传播、健康检查和可观测性。
 
-> 当前状态：**v0.1 / Phase 0（基础服务）已完成，Phase 1（非流式单后端代理）进行中，但尚未达到验收闭环**。仓库已具备 Go 模块、命令入口、严格 JSON 配置加载、HTTP 服务、`GET /healthz`、Request ID、基础结构化请求日志和最小 CI，并已实现 SIGINT/SIGTERM 驱动的可配置限时 `Server.Shutdown`。Phase 1 已实现单 backend 配置和 origin 校验、代理依赖装配、请求体限长读取、请求探针解析与校验、最小上游 POST、调用方 context 继承，以及请求 header 过滤与网关托管 header 覆盖等基础组件；这些组件仍未接入 `/v1/chat/completions`。
+> 当前状态：**v0.1 / Phase 0（基础服务）已完成，Phase 1（非流式单后端代理）进行中，但尚未达到阶段验收闭环**。已接入 `POST /v1/chat/completions`，复用请求校验、Proxy 和响应转发组件完成非流式单 backend HTTP 调用链；D8 的超时与故障精细分类、D9 的独立 mock backend 和真实后端 Demo 仍待完成。
 
 ## 项目目标
 
@@ -36,7 +36,7 @@ v0.1 的核心目标包括：
 
 ## 当前进度
 
-截至当前实现，项目已完成路线图的 Phase 0，Phase 1 已进入进行中状态。单 backend 配置、origin 校验和代理依赖装配已有代码与单元测试支撑；请求体读取、请求探针和上游请求也有独立组件测试，但代理尚未接入生产 Handler，因此对应端到端路线任务仍未勾选，Phase 1 验收项尚未达成。
+截至当前实现，项目已完成 Phase 0 和 Phase 1 的 D7 Handler 集成。自动化测试已验证客户端经网关到测试上游的非流式调用链，Phase 1 整体验收仍待 D8、D9 完成。
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
@@ -48,9 +48,9 @@ v0.1 的核心目标包括：
 | `app.Run` 生命周期边界 | 已完成 Phase 0 | App 组装 HTTP Server，返回监听错误，并在 context 取消后执行限时 `Shutdown` |
 | SIGINT/SIGTERM 与优雅关闭 | 已完成 Phase 0 | 入口将信号转换为 context 取消，App 按 `server.shutdown_timeout` 等待服务关闭 |
 | CI | 已完成 Phase 0 | GitHub Actions 在 push 和 pull request 时检查 format、vet 和 test；当前本地检查全部通过 |
-| 请求体读取与请求探针 | 已完成 Phase 1 基础组件 | 组件测试已验证限长读取原始 body、只解析 `model` 和 `stream`，以及拒绝无效输入；尚未形成 HTTP 接口行为 |
-| 最小上游请求 | 已完成 Phase 1 基础组件 | 使用共享 `http.Client` 发送 POST，原样保留请求 body，并继承调用方 context；过滤固定及 `Connection` 动态声明的 hop-by-hop headers，由网关覆盖 Request ID 和可选上游凭据；尚未接入 HTTP API |
-| 非流式端到端代理 | 进行中 | 单 backend 配置与代理依赖已装配；`/v1/chat/completions` 路由、响应透传与统一错误仍待实现 |
+| 请求体读取与请求探针 | 已接入 Handler | 固定 4 MiB 上限，只解析 `model` 和 `stream`；拒绝空 model 和 `stream=true`，其他字段交给 backend |
+| 最小上游请求 | 已接入 HTTP API | 使用共享 Client 与请求 context，原始 body 和 model 原样转发；复用 header 过滤、网关 Request ID 和 backend 凭据设置 |
+| 非流式端到端代理 | D7 已实现 | 透传上游状态、允许的 header 和 body；输入错误返回统一 JSON，提交后复制失败只记录日志；阶段 Demo 和超时精细分类待完成 |
 | SSE 与客户端断连处理 | 未开始 | Phase 2 |
 | 多后端路由与健康检查 | 未开始 | Phase 3 |
 | Prometheus 指标 | 未开始 | Phase 4 |
@@ -93,7 +93,7 @@ time=... level=INFO msg="starting HTTP server" address=127.0.0.1:8080
 curl -i http://127.0.0.1:8080/healthz
 ```
 
-响应状态为 `200 OK`、body 为 `OK`，并包含 `X-Request-ID`。按 Ctrl+C 会触发信号驱动的优雅关闭，服务按照 `server.shutdown_timeout` 等待在途 Handler 完成；默认等待 5 秒，超时后返回错误并由进程退出。配置中的 backend origin 会在启动时校验，并用于装配代理依赖；当前 `/v1/chat/completions` 尚未注册，因此服务还不能代理推理请求。
+响应状态为 `200 OK`、body 为 `OK`，并包含 `X-Request-ID`。按 Ctrl+C 会触发信号驱动的优雅关闭，服务按照 `server.shutdown_timeout` 等待在途 Handler 完成；默认等待 5 秒，超时后返回错误并由进程退出。配置中的 backend origin 会在启动时校验；`POST /v1/chat/completions` 将非流式请求发送到该 origin 的同名路径，需要自行启动兼容 backend。
 
 不指定 `-config` 时使用内置默认配置：
 
@@ -120,9 +120,9 @@ go run ./cmd/argusgate
 }
 ```
 
-`shutdown_timeout` 使用 Go duration 格式，例如 `5s`、`500ms` 或 `1m`。`backends` 当前必须恰好包含一项；`origin` 必须是没有凭据、业务路径、query 或 fragment 的 HTTP(S) origin。`authorization` 当前作为完整 header 值原样设置到上游请求；留空时不设置该 header。环境变量引用尚未实现；需要在本机联调时，真实凭据只能放在不跟踪的本地配置文件中，绝不能提交。Chat Completions 路由尚未接通，配置 backend 目前不代表已经可调用。
+`shutdown_timeout` 使用 Go duration 格式，例如 `5s`、`500ms` 或 `1m`。`backends` 当前必须恰好包含一项；`origin` 必须是没有凭据、业务路径、query 或 fragment 的 HTTP(S) origin。`authorization` 当前作为完整 header 值原样设置到上游请求；留空时不设置该 header。环境变量引用尚未实现；需要在本机联调时，真实凭据只能放在不跟踪的本地配置文件中，绝不能提交。客户端 Authorization 默认丢弃。
 
-配置加载器还会拒绝未知字段、多个顶层 JSON 值和非法配置；配置扩展的校验路径由 `internal/config` 测试覆盖。其余 HTTP 超时、请求体上限、健康检查和传输参数仍按路线图逐步加入。
+配置加载器还会拒绝未知字段、多个顶层 JSON 值和非法配置；配置扩展的校验路径由 `internal/config` 测试覆盖。请求体目前固定限制为 4 MiB，尚无对应配置项；其余 HTTP 超时、健康检查和传输参数仍按路线图逐步加入。D7 上游请求失败暂统一返回安全的 502 JSON；408/502/504 精细分类与超时策略由 D8 完成。
 
 ## 开发与验证
 

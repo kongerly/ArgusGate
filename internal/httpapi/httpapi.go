@@ -13,6 +13,7 @@ func NewHandler(logger *slog.Logger, p *proxy.Proxy) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", healthz)
+	mux.HandleFunc("/v1/chat/completions", chatCompletions(logger, p))
 
 	handler := loggingMiddleware(logger, mux)
 	// Request ID 必须位于日志中间件外层，日志才能读取它写入的 request context。
