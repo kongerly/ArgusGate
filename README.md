@@ -1,12 +1,13 @@
 # ArgusGate
 
-ArgusGate 是一个正在使用 Go 构建的 OpenAI-compatible AI 推理网关。它位于 AI 应用与独立推理服务之间，计划统一处理请求校验、后端路由、普通与 SSE 响应转发、取消传播、健康检查和可观测性。
+ArgusGate 是一个使用 Go 构建的 OpenAI-compatible AI 推理网关。它位于 AI 应用与 llama.cpp、vLLM 等独立推理服务之间，本身不运行模型，致力于统一承担请求校验、后端路由、普通与 SSE 响应转发、取消传播、健康检查和可观测性。
 
-> 当前状态：**v0.1 / Phase 0（基础服务）已完成，Phase 1（非流式单后端代理）进行中，但尚未达到阶段验收闭环**。已接入 `POST /v1/chat/completions`，复用请求校验、Proxy 和响应转发组件完成非流式单 backend HTTP 调用链；D8 的超时与故障精细分类、D9 的独立 mock backend 和真实后端 Demo 仍待完成。
+> [!NOTE]
+> **当前状态**：**v0.1 / Phase 0（基础服务）已完成，Phase 1（非流式单后端代理）进行中，尚未达到阶段验收闭环**。目前已接入 `POST /v1/chat/completions` 非流式单 backend 代理主链路；超时策略与 `408`/`502`/`504` 精细故障分类、独立 mock backend 以及真实后端联调 Demo 仍待完成。
 
-## 项目目标
+## 项目定位与架构
 
-ArgusGate 不运行模型。llama.cpp、vLLM 等 OpenAI-compatible 服务作为独立 inference backend 运行，客户端只需要访问一个统一入口。
+客户端只需访问 ArgusGate 提供的统一 OpenAI-compatible 入口，模型推理仍由独立的 inference backend 进程承担：
 
 ```text
 AI Application
@@ -25,55 +26,44 @@ AI Application
       llama.cpp            vLLM
 ```
 
-v0.1 的核心目标包括：
+**v0.1 计划达成目标：**
 
 - 提供 `POST /v1/chat/completions`，透明转发普通 JSON 与 SSE 流式响应。
 - 在客户端断开后取消上游请求，避免继续占用推理资源。
-- 按 `model` 精确匹配后端，并在健康实例之间 round-robin。
+- 按 `model` 精确匹配后端，并在健康实例之间进行 round-robin 路由。
 - 自动隔离异常后端，并在恢复后重新加入路由。
-- 提供 `/healthz`、`/readyz`、`/metrics` 以及结构化请求日志。
-- 支持本地运行、自动测试、race test 和 Docker 运行。
+- 提供 `/healthz`、`/readyz`、`/metrics` 与结构化请求日志。
+- 支持本地运行、自动化测试、`race test` 与 Docker 运行。
 
 ## 当前进度
 
-截至当前实现，项目已完成 Phase 0 和 Phase 1 的 D7 Handler 集成。自动化测试已验证客户端经网关到测试上游的非流式调用链，Phase 1 整体验收仍待 D8、D9 完成。
-
-| 能力 | 状态 | 说明 |
+| 阶段 / 模块 | 状态 | 当前能力说明 |
 | --- | --- | --- |
-| Go module 与命令入口 | 已完成最小骨架 | module 为 `github.com/kongerly/ArgusGate` |
-| JSON 配置默认值、读取与基础校验 | 已完成 Phase 0；Phase 1 配置扩展已实现 | 严格 JSON 读取；校验监听地址、关闭超时，并要求恰好一个使用合法 HTTP(S) origin 的 backend |
-| 示例配置 | 已更新 | 包含监听地址、关闭超时和一个本地 backend；Authorization 留空 |
-| HTTP Server 与 `/healthz` | 已完成最小版本 | 服务监听配置地址；`GET /healthz` 返回 200，其他 method 由路由拒绝 |
-| Request ID 与结构化请求日志 | 已完成最小版本 | 响应包含 `X-Request-ID`，请求结束记录 method、path、status、request ID 和 duration |
-| `app.Run` 生命周期边界 | 已完成 Phase 0 | App 组装 HTTP Server，返回监听错误，并在 context 取消后执行限时 `Shutdown` |
-| SIGINT/SIGTERM 与优雅关闭 | 已完成 Phase 0 | 入口将信号转换为 context 取消，App 按 `server.shutdown_timeout` 等待服务关闭 |
-| CI | 已完成 Phase 0 | GitHub Actions 在 push 和 pull request 时检查 format、vet 和 test；当前本地检查全部通过 |
-| 请求体读取与请求探针 | 已接入 Handler | 固定 4 MiB 上限，只解析 `model` 和 `stream`；拒绝空 model 和 `stream=true`，其他字段交给 backend |
-| 最小上游请求 | 已接入 HTTP API | 使用共享 Client 与请求 context，原始 body 和 model 原样转发；复用 header 过滤、网关 Request ID 和 backend 凭据设置 |
-| 非流式端到端代理 | D7 已实现 | 透传上游状态、允许的 header 和 body；输入错误返回统一 JSON，提交后复制失败只记录日志；阶段 Demo 和超时精细分类待完成 |
-| SSE 与客户端断连处理 | 未开始 | Phase 2 |
-| 多后端路由与健康检查 | 未开始 | Phase 3 |
-| Prometheus 指标 | 未开始 | Phase 4 |
-| Docker 与发布验证 | 未开始 | Phase 5 |
+| Phase 0：基础服务 | 已完成 | 包含 `github.com/kongerly/ArgusGate` 命令入口、JSON 配置加载与严格校验、HTTP Server 与 `GET /healthz`、`X-Request-ID` 生成与结构化请求日志、`app.Run` 生命周期与 `SIGINT`/`SIGTERM` 优雅关闭，以及 GitHub Actions CI。 |
+| Phase 1：单 backend 配置 | 已完成 | 校验监听地址与关闭超时，要求恰好配置 1 个合法 HTTP(S) origin 的 backend（含可选 `authorization`）；示例配置已同步。 |
+| Phase 1：请求校验与探针 | 已接入 | `POST /v1/chat/completions` 校验请求方法与 `application/json` 类型，应用固定 4 MiB 请求体上限，仅解析 `model` 与 `stream`，拒绝空 `model` 与 `stream=true`，其余字段保留原始字节。 |
+| Phase 1：非流式代理转发 | 已接入 | 复用共享 `http.Client`（禁止自动跟随 3xx 重定向）与请求 context，过滤 hop-by-hop 及网关托管 header，显式设置 `X-Request-ID` 与 backend `Authorization`，透传上游状态码、允许的 header 与响应体；提交前返回统一 JSON 错误，提交后失败仅记录日志。 |
+| Phase 1：阶段收尾项 | 待完成 | 超时策略与 `408`/`502`/`504` 精细故障分类（当前上游失败暂统一返回安全 `502` JSON）、独立 mock backend 以及真实后端 Demo 尚未完成。 |
+| Phase 2：SSE 与取消传播 | 未开始 | SSE 实时 flush、TTFB 统计、客户端断连取消传播与强制关闭分类。 |
+| Phase 3：多后端与健康检查 | 未开始 | Backend Registry、状态机、后台周期探测、多后端 round-robin 与 `GET /readyz`。 |
+| Phase 4：可观测性与指标 | 未开始 | 请求全生命周期统一日志与 Prometheus `GET /metrics`。 |
+| Phase 5：Docker 与发布验证 | 未开始 | Dockerfile、可复现压测与 v0.1 发布检查。 |
 
-当前代码已在 Go 1.27.1 / Windows amd64 环境通过：
+现有自动化测试覆盖配置默认值与严格解析校验、`/healthz` 与 method 限制、`X-Request-ID` 与请求日志、`app.Run` 优雅关闭与监听冲突处理。针对 `POST /v1/chat/completions` 的测试还覆盖 4 MiB 请求体边界与探针校验、原始请求体保留、context 取消传播、hop-by-hop 与网关托管 header 隔离（防止客户端认证与 Request ID 绕过）、多值 header 保留，以及上游响应透传与提交后错误处理。
 
-```text
-go test ./...
-go vet ./...
-gofmt -l .
-```
-
-其中 `gofmt -l .` 无输出。现有测试覆盖配置默认值、配置覆盖及主要失败路径，包含关闭超时的默认值和非法值校验；同时验证健康检查、method 限制、Request ID、请求日志，以及 `app.Run` 在 context 取消时退出和监听地址冲突时返回错误。Phase 1 测试还覆盖请求体大小边界、请求探针解析与校验、上游 POST 原始 body 保留、context 取消后停止等待上游响应、hop-by-hop header 过滤、多值 header 保留，以及客户端认证和 Request ID 不会绕过网关托管规则。
-
-## 快速开始（当前开发状态）
+## 快速开始
 
 ### 环境要求
 
-- Go 1.27.1（以 [`go.mod`](./go.mod) 的 `go` directive 为准）
+- Go 1.27.3 或更新的受支持安全补丁版本（最低版本以 [`go.mod`](./go.mod) 的 `go` directive 为准）
 - Git
 
-克隆仓库后，在项目根目录执行：
+> [!IMPORTANT]
+> 2026-10-22 将最低 Go 版本提升至 1.27.3，以覆盖标准库 HTTP/2 响应处理和证书验证等安全修复，见 [Go 发布记录](https://go.dev/doc/devel/release#go1.27.3)、[GO-2026-6610](https://pkg.go.dev/vuln/GO-2026-6610) 和 [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809)。已有二进制必须用修复版工具链重新构建并在部署时替换、重启；仅升级本机 Go 或修改 `go.mod` 不会修复旧产物。更新后，使用 `go version -m <binary>` 核验构建版本。
+
+### 启动服务
+
+克隆仓库后，在项目根目录使用示例配置启动：
 
 ```bash
 go version
@@ -81,29 +71,45 @@ go mod download
 go run ./cmd/argusgate -config ./configs/argusgate.example.json
 ```
 
-当前预期启动日志类似：
-
-```text
-time=... level=INFO msg="starting HTTP server" address=127.0.0.1:8080
-```
-
-程序会持续监听 `127.0.0.1:8080`。在另一个终端验证探活：
-
-```bash
-curl -i http://127.0.0.1:8080/healthz
-```
-
-响应状态为 `200 OK`、body 为 `OK`，并包含 `X-Request-ID`。按 Ctrl+C 会触发信号驱动的优雅关闭，服务按照 `server.shutdown_timeout` 等待在途 Handler 完成；默认等待 5 秒，超时后返回错误并由进程退出。配置中的 backend origin 会在启动时校验；`POST /v1/chat/completions` 将非流式请求发送到该 origin 的同名路径，需要自行启动兼容 backend。
-
-不指定 `-config` 时使用内置默认配置：
+不指定 `-config` 时，服务使用内置默认配置启动：
 
 ```bash
 go run ./cmd/argusgate
 ```
 
-## 当前配置
+预期启动日志类似：
 
-配置使用 JSON。当前支持监听地址、关闭超时和恰好一个 backend：
+```text
+time=... level=INFO msg="starting HTTP server" address=127.0.0.1:8080
+```
+
+按 `Ctrl+C` 或发送 `SIGTERM` 会触发信号驱动的优雅关闭，服务按 `server.shutdown_timeout`（默认 `5s`）等待在途请求完成，超时后返回错误并退出进程。
+
+### 接口验证
+
+在另一个终端验证探活接口：
+
+```bash
+curl -i http://127.0.0.1:8080/healthz
+```
+
+正常返回状态码 `200 OK`、响应体 `OK`，并携带网关生成的 `X-Request-ID`。
+
+如需验证 `POST /v1/chat/completions` 非流式代理，请先在配置指定的 backend origin（默认为 `http://127.0.0.1:8081`）启动兼容 OpenAI API 的推理后端，再发送请求：
+
+```bash
+curl -i -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen-local","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+- 网关会将原始请求体转发到配置 backend origin 的 `/v1/chat/completions` 路径，并透传上游状态码、允许的响应头与响应体。
+- 当前阶段仅支持非流式请求（省略 `stream` 或设为 `false`）；传入 `"stream": true` 会返回 `400`（`stream_not_supported`）。
+- 请求体固定限制为 4 MiB，超出返回 `413`（`request_too_large`）。
+
+## 配置说明
+
+当前使用静态 JSON 配置（见 [`configs/argusgate.example.json`](./configs/argusgate.example.json)）：
 
 ```json
 {
@@ -120,13 +126,22 @@ go run ./cmd/argusgate
 }
 ```
 
-`shutdown_timeout` 使用 Go duration 格式，例如 `5s`、`500ms` 或 `1m`。`backends` 当前必须恰好包含一项；`origin` 必须是没有凭据、业务路径、query 或 fragment 的 HTTP(S) origin。`authorization` 当前作为完整 header 值原样设置到上游请求；留空时不设置该 header。环境变量引用尚未实现；需要在本机联调时，真实凭据只能放在不跟踪的本地配置文件中，绝不能提交。客户端 Authorization 默认丢弃。
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `server.address` | `127.0.0.1:8080` | HTTP 服务监听地址，不能为空。 |
+| `server.shutdown_timeout` | `5s` | 优雅关闭等待在途请求的超时时间，使用 Go duration 格式（如 `500ms`、`5s`、`1m`）。 |
+| `backends[].origin` | `http://127.0.0.1:8081` | 上游 HTTP(S) origin；当前 `backends` 必须恰好包含 1 项，且禁止包含 userinfo、业务路径（仅允许为空或 `/`）、query 或 fragment。 |
+| `backends[].authorization` | `""` | 可选；非空时作为完整 `Authorization` header 值原样发往上游，留空时不设置该 header。 |
 
-配置加载器还会拒绝未知字段、多个顶层 JSON 值和非法配置；配置扩展的校验路径由 `internal/config` 测试覆盖。请求体目前固定限制为 4 MiB，尚无对应配置项；其余 HTTP 超时、健康检查和传输参数仍按路线图逐步加入。D7 上游请求失败暂统一返回安全的 502 JSON；408/502/504 精细分类与超时策略由 D8 完成。
+**配置规则与当前限制：**
+
+- **严格校验**：加载配置时会拒绝未知字段、多个顶层 JSON 值以及非法字段值。
+- **凭据安全**：客户端请求的 `Authorization` 默认丢弃，不会透传给上游。当前尚未支持环境变量引用，示例配置保持留空；本地联调如需真实凭据，请仅放在未跟踪的本地配置文件中，切勿提交到版本库。
+- **阶段限制**：请求体大小目前固定为 4 MiB（暂未开放配置项）；其余 HTTP 超时、健康检查、多后端与传输参数将在后续阶段按路线图加入。上游请求失败当前暂统一返回安全的 `502` JSON，`408`/`502`/`504` 的精细分类将在 Phase 1 后续任务中完善。
 
 ## 开发与验证
 
-从仓库根目录执行日常检查：
+在仓库根目录执行日常格式、静态检查与测试：
 
 ```bash
 go fmt ./...
@@ -134,40 +149,41 @@ go vet ./...
 go test ./...
 ```
 
-共享并发状态实现后，还需要执行：
+后续引入共享并发状态后（Phase 3），还需执行：
 
 ```bash
 go test -race ./...
 ```
 
-提交前请检查变更中不包含密钥、本地配置、日志、构建产物、模型文件或个人机器路径。示例中的 `authorization` 保持为空；当前配置尚不支持环境变量引用，因此不要把真实凭据写入示例配置或任何提交文件。
+GitHub Actions CI 会在 `push` 和 `pull_request` 时读取 [`go.mod`](./go.mod) 安装对应工具链（`GOTOOLCHAIN=local`），检查 `gofmt -l .`、`go vet ./...` 和 `go test ./...`。提交前请确认变更中不包含密钥、本地配置、日志、构建产物、模型文件或个人机器路径。
 
-## v0.1 路线
+## v0.1 路线与边界
 
-| 阶段 | 主题 | 可验收结果 |
-| --- | --- | --- |
-| Phase 0 | 基础服务 | 服务启动、探活、结构化日志和优雅退出 |
-| Phase 1 | 单后端非流式代理 | 可代理真实 Chat Completions 请求 |
-| Phase 2 | SSE 与取消传播 | 流式及时 flush，断连后停止上游请求 |
-| Phase 3 | 多后端与健康检查 | model 路由、故障隔离、恢复和 race-free 并发 |
-| Phase 4 | 可观测性 | 请求生命周期日志和 Prometheus 指标 |
-| Phase 5 | 发布质量 | Docker、可复现测试与压测、v0.1 发布检查 |
+| 阶段 | 状态 | 主题 | 可验收结果 |
+| --- | --- | --- | --- |
+| Phase 0 | 已完成 | 基础服务 | 服务启动、探活、结构化日志和优雅退出 |
+| Phase 1 | 进行中 | 单后端非流式代理 | 可代理真实 Chat Completions 请求 |
+| Phase 2 | 未开始 | SSE 与取消传播 | 流式及时 flush，断连后停止上游请求 |
+| Phase 3 | 未开始 | 多后端与健康检查 | model 路由、故障隔离、恢复和 race-free 并发 |
+| Phase 4 | 未开始 | 可观测性 | 请求生命周期日志和 Prometheus 指标 |
+| Phase 5 | 未开始 | 发布质量 | Docker、可复现测试与压测、v0.1 发布检查 |
 
 完整任务、验收门槛和 Knowledge Checkpoint 见 [`docs/v0.1_roadmap.md`](./docs/v0.1_roadmap.md)。
 
-## v0.1 边界
+### v0.1 边界
 
-v0.1 聚焦一个正确、可测试的推理代理，不包含：
+v0.1 聚焦一个正确、可测试的推理代理，不包含以下能力：
 
-- 用户系统、API key 管理、RBAC 或复杂鉴权。
-- 自动重试、熔断、速率限制和动态服务发现。
-- 完整 OpenAI API 覆盖或 `/v1/models` 聚合。
-- 配置热加载、管理控制台和 OpenTelemetry tracing。
-- 模型运行、调度或内容安全审核。
+- 用户系统、API key 管理、RBAC 或复杂鉴权
+- 自动重试、熔断、速率限制与动态服务发现
+- 完整 OpenAI API 覆盖或 `/v1/models` 聚合
+- 配置热加载、管理控制台与 OpenTelemetry tracing
+- 模型运行、调度或内容安全审核
 
-在没有认证能力的情况下，服务只应部署在本机或受信任网络，不应直接暴露到公网。
+> [!WARNING]
+> 在没有认证能力的情况下，v0.1 服务只应部署在本机或受信任网络，不应直接暴露到公网。
 
-## 文档索引
+## 文档索引与贡献约定
 
 - [`docs/design.md`](./docs/design.md)：v0.1 的定位、范围、接口、架构和行为基线。
 - [`docs/v0.1_roadmap.md`](./docs/v0.1_roadmap.md)：分阶段任务、验收条件与发布清单。
@@ -176,7 +192,7 @@ v0.1 聚焦一个正确、可测试的推理代理，不包含：
 
 当文档之间出现冲突时，系统行为以 `design.md` 为准，阶段范围以 `v0.1_roadmap.md` 为准，工程执行方式以 `engineering.md` 为准。
 
-## 贡献约定
+**贡献约定：**
 
 - 只为当前阶段创建包和抽象，不预建未来目录。
 - 行为变化与对应测试一起提交。

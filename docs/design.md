@@ -745,6 +745,11 @@ git diff --exit-code -- '*.go'
 
 v0.1 发布后，根据真实使用和压测结果再排序：
 
+- **多协议透传（优先支持 OpenAI、Anthropic 与 Gemini）**：保持核心 `proxy`、`registry` 与 `observability` 协议无关，延续“原始字节透传、不重编码 JSON、不重组 SSE”的代理不变量，将协议差异收敛在 `httpapi` 入口与路由配置层。
+  - **多路由与路由键**：在 `/v1/chat/completions` 之外扩展 Anthropic（`POST /v1/messages`）和 Gemini（`POST /v1beta/models/{model}:{action}`）原生入口；路由键从 `model` 演进为 `(protocol, model)`，各组合维护独立 round-robin 游标。
+  - **Gemini 路径与 query 安全边界**：严格校验 URL 路径中的 `{model}`（禁止路径穿越）与 `{action}` 白名单（`generateContent`、`streamGenerateContent`），对 query 参数采用显式白名单（仅允许透传 `alt=sse`，拒绝或剥离 `?key=` 等敏感或未知参数）；日志与指标继续记录固定路由模板而非原始 URL。
+  - **声明式上游凭据与隔离**：后端认证配置从固定 `Authorization` 扩展为显式声明头名、前缀与环境变量（如 `Authorization: Bearer ...`、`x-api-key`、`x-goog-api-key`），请求方向默认统一剥离常见凭据头及目标 backend 声明的认证头。
+  - **云端后端健康检查模式**：除自建后端（llama.cpp、vLLM 等）的主动 `/health` 探测外，允许对无免鉴权健康端点的云端 API 后端关闭主动探测，按需结合后续被动故障隔离机制。
 - Least-in-flight 路由。
 - 仅在安全失败窗口内的有限重试。
 - 熔断、速率限制和并发上限。
