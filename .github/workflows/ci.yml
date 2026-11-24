@@ -7,11 +7,14 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
 
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v7
+      - name: Set up Go from go.mod (security minimum)
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
